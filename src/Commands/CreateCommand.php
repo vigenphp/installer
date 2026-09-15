@@ -21,6 +21,17 @@ use Vigen\Providers\ProviderModels;
 #[AsCommand(name: 'create', description: 'Create a new Vigen project.')]
 class CreateCommand extends Command
 {
+    /**
+     * Provider key => the label shown in the prompt. The keys are what ends up
+     * in .env, so they are the values that matter; the labels are display only.
+     */
+    private const PROVIDERS = [
+        'ollama' => 'Ollama (Offline)',
+        'openai' => 'OpenAI',
+        'claude' => 'Claude',
+        'gemini' => 'Gemini',
+    ];
+
     protected function configure(): void
     {
         $this->setAliases(['new']);
@@ -31,21 +42,33 @@ class CreateCommand extends Command
         $this->addOption('api-key', null, InputOption::VALUE_REQUIRED, 'API key for the chosen provider - skips that prompt');
     }
 
-    protected function execute(InputInterface $input, OutputInterface $output): int
+    /**
+     * Runs in both interactive and non-interactive mode, before either
+     * interact() or execute(), so the banner is shown exactly once.
+     */
+    protected function initialize(InputInterface $input, OutputInterface $output): void
     {
-        $helper = $this->getHelper('question');
-
         $output->writeln('<info>VIGEN</info>');
         $output->writeln('Describe what you want. Vigen builds it.');
         $output->writeln('');
+    }
+
+    /**
+     * Collects every answer and writes it back into $input, so that execute()
+     * reads a single fully-populated source and nothing is written to disk
+     * until all the questions have been answered. Symfony skips this method
+     * entirely under --no-interaction; execute() supplies the defaults then.
+     */
+    protected function interact(InputInterface $input, OutputInterface $output): void
+    {
+        $helper = $this->getHelper('question');
 
         // 1. Project name. Declared optional so that a bare `vigen create`
         // prompts for it, the way `laravel new` does - a required argument is
         // rejected by ArgvInput before any prompt could run.
-        $name = $input->getArgument('name');
-        if ($name === null) {
-            $nameQuestion = new Question('What is the name of your project? ');
-            $nameQuestion->setValidator(static function (?string $answer): string {
+        if ($input->getArgument('name') === null) {
+            $question = new Question('What is the name of your project? ');
+            $question->setValidator(static function (?string $answer): string {
                 $answer = trim((string) $answer);
                 if ($answer === '') {
                     throw new RuntimeException('The project name cannot be empty.');
@@ -53,18 +76,71 @@ class CreateCommand extends Command
 
                 return $answer;
             });
-            $name = $helper->ask($input, $output, $nameQuestion);
-            $input->setArgument('name', $name);
-        }
-        $name = trim((string) $name);
 
-        // Reached when the name was neither given nor prompted for, e.g. under
-        // --no-interaction with no argument.
+            $input->setArgument('name', $helper->ask($input, $output, $question));
+        }
+
+        // 2. Preferred chat interface.
+        if ($input->getOption('interface') === null) {
+            $input->setOption('interface', $helper->ask(
+                $input,
+                $output,
+                new ChoiceQuestion('Choose chat preferred:', ['cli', 'gui'], 0)
+            ));
+        }
+
+        // 3. Default AI provider.
+        if ($input->getOption('provider') === null) {
+            $label = $helper->ask($input, $output, new ChoiceQuestion(
+                'Which default AI Provider:',
+                array_values(self::PROVIDERS),
+                0
+            ));
+
+            $input->setOption('provider', array_search($label, self::PROVIDERS, true) ?: 'ollama');
+        }
+
+        // 4. Model for the chosen provider.
+        if ($input->getOption('model') === null) {
+            $input->setOption('model', $helper->ask(
+                $input,
+                $output,
+                new ChoiceQuestion('Which model to use:', ProviderModels::for($this->provider($input)), 0)
+            ));
+        }
+
+        // 5. API key, but only for providers that need one. Ollama runs locally
+        // and has no key, so it is never asked for.
+        $apiKeyEnvVar = ProviderModels::apiKeyEnvVar($this->provider($input));
+        if ($apiKeyEnvVar !== null && $input->getOption('api-key') === null) {
+            $question = new Question(sprintf('Enter your %s API key: ', $this->providerLabel($this->provider($input))));
+            $question->setHidden(true);
+
+            $input->setOption('api-key', (string) $helper->ask($input, $output, $question));
+        }
+    }
+
+    /**
+     * Everything past this point is the install itself. All values are read
+     * from $input first, so nothing below can leave a half-built project
+     * behind because a later question was abandoned.
+     */
+    protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        $name = trim((string) $input->getArgument('name'));
+
+        // Reachable under --no-interaction, where interact() never ran.
         if ($name === '') {
             $output->writeln('<error>A project name is required.</error>');
 
             return Command::INVALID;
         }
+
+        $interface = strtolower((string) ($input->getOption('interface') ?? 'cli'));
+        $provider = $this->provider($input);
+        $model = (string) ($input->getOption('model') ?? ProviderModels::for($provider)[0] ?? '');
+        $apiKey = $input->getOption('api-key');
+        $apiKeyEnvVar = ProviderModels::apiKeyEnvVar($provider);
 
         $projectRoot = rtrim(getcwd() ?: '.', '/') . '/' . $name;
 
@@ -74,49 +150,6 @@ class CreateCommand extends Command
             return Command::FAILURE;
         }
 
-        // 2. Preferred chat interface.
-        $interface = $input->getOption('interface');
-        if ($interface === null) {
-            $interface = $helper->ask($input, $output, new ChoiceQuestion('Choose chat preferred:', ['cli', 'gui'], 0));
-        }
-        $interface = strtolower($interface);
-
-        // 3. Default AI provider.
-        $providerLabels = [
-            'ollama' => 'Ollama (Offline)',
-            'openai' => 'OpenAI',
-            'claude' => 'Claude',
-            'gemini' => 'Gemini',
-        ];
-        $provider = $input->getOption('provider');
-        if ($provider === null) {
-            $label = $helper->ask($input, $output, new ChoiceQuestion(
-                'Which default AI Provider:',
-                array_values($providerLabels),
-                0
-            ));
-            $provider = array_search($label, $providerLabels, true) ?: 'ollama';
-        }
-        $provider = strtolower($provider);
-        $providerLabel = $providerLabels[$provider] ?? $provider;
-
-        // 4. Model for the chosen provider.
-        $model = $input->getOption('model');
-        if ($model === null) {
-            $models = ProviderModels::for($provider);
-            $model = $helper->ask($input, $output, new ChoiceQuestion('Which model to use:', $models, 0));
-        }
-
-        // 5. API key, if required and not already supplied.
-        $apiKey = $input->getOption('api-key');
-        $apiKeyEnvVar = ProviderModels::apiKeyEnvVar($provider);
-        if ($apiKeyEnvVar !== null && $apiKey === null) {
-            $keyQuestion = new Question("Enter your {$providerLabel} API key: ");
-            $keyQuestion->setHidden(true);
-            $apiKey = (string) $helper->ask($input, $output, $keyQuestion);
-        }
-
-        $output->writeln('');
         $output->writeln('> Creating your Vigen project...');
 
         mkdir($projectRoot, 0755, true);
@@ -157,10 +190,36 @@ class CreateCommand extends Command
         return Command::SUCCESS;
     }
 
+    /**
+     * The chosen provider, lowercased, defaulting to ollama.
+     */
+    private function provider(InputInterface $input): string
+    {
+        return strtolower((string) ($input->getOption('provider') ?? 'ollama'));
+    }
+
+    private function providerLabel(string $provider): string
+    {
+        return self::PROVIDERS[$provider] ?? $provider;
+    }
+
+    /**
+     * Composer requires package names to be lowercase and match its own name
+     * pattern, so a directory called "MyApp" or "my app" would otherwise produce
+     * a composer.json that `composer install` refuses to read. The directory
+     * keeps whatever the user typed; only the package name is normalised.
+     */
+    private function packageName(string $name): string
+    {
+        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($name)), '-');
+
+        return 'vigen-app/' . ($slug === '' ? 'app' : $slug);
+    }
+
     private function projectComposerJson(string $name): string
     {
         $data = [
-            'name' => "vigen-app/{$name}",
+            'name' => $this->packageName($name),
             'description' => 'A Vigen application. Describe what you want. Vigen builds it.',
             'type' => 'project',
             'license' => 'MIT',
