@@ -1,0 +1,24 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoloadPaths = [
+    __DIR__ . '/../vendor/autoload.php',   // installed as a project
+    __DIR__ . '/../../../autoload.php',    // installed as a dependency (e.g. composer global require)
+];
+
+foreach ($autoloadPaths as $autoloadPath) {
+    if (file_exists($autoloadPath)) {
+        require $autoloadPath;
+        break;
+    }
+}
+
+if (! class_exists(Vigen\Installer\Application::class)) {
+    fwrite(STDERR, "Vigen Installer: unable to locate the autoloader. Try running `composer global require vigenphp/installer` again.\n");
+    exit(1);
+}
+
+$app = new Vigen\Installer\Application();
+exit($app->run($argv));

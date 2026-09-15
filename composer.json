@@ -1,0 +1,24 @@
+{
+    "name": "vigenphp/installer",
+    "version": "0.1.0",
+    "description": "The Vigen installer. `vigen create my-app` - like `laravel new`, but for Vigen.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["vigen", "php", "framework", "installer", "scaffolding"],
+    "homepage": "https://github.com/vigenphp/installer",
+    "require": {
+        "php": "^8.2",
+        "symfony/console": "^7.0",
+        "vigenphp/vigen": "^0.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Vigen\\Installer\\": "src/"
+        }
+    },
+    "bin": [
+        "bin/vigen"
+    ],
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
