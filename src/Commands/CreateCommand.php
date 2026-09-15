@@ -24,7 +24,7 @@ class CreateCommand extends Command
     protected function configure(): void
     {
         $this->setAliases(['new']);
-        $this->addArgument('name', InputArgument::REQUIRED, 'Directory name for the new project');
+        $this->addArgument('name', InputArgument::OPTIONAL, 'Directory name for the new project');
         $this->addOption('interface', null, InputOption::VALUE_REQUIRED, 'cli or gui - skips that prompt');
         $this->addOption('provider', null, InputOption::VALUE_REQUIRED, 'ollama|openai|claude|gemini - skips that prompt');
         $this->addOption('model', null, InputOption::VALUE_REQUIRED, 'Model name - skips that prompt');
@@ -34,7 +34,38 @@ class CreateCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $helper = $this->getHelper('question');
-        $name = (string) $input->getArgument('name');
+
+        $output->writeln('<info>VIGEN</info>');
+        $output->writeln('Describe what you want. Vigen builds it.');
+        $output->writeln('');
+
+        // 1. Project name. Declared optional so that a bare `vigen create`
+        // prompts for it, the way `laravel new` does - a required argument is
+        // rejected by ArgvInput before any prompt could run.
+        $name = $input->getArgument('name');
+        if ($name === null) {
+            $nameQuestion = new Question('What is the name of your project? ');
+            $nameQuestion->setValidator(static function (?string $answer): string {
+                $answer = trim((string) $answer);
+                if ($answer === '') {
+                    throw new RuntimeException('The project name cannot be empty.');
+                }
+
+                return $answer;
+            });
+            $name = $helper->ask($input, $output, $nameQuestion);
+            $input->setArgument('name', $name);
+        }
+        $name = trim((string) $name);
+
+        // Reached when the name was neither given nor prompted for, e.g. under
+        // --no-interaction with no argument.
+        if ($name === '') {
+            $output->writeln('<error>A project name is required.</error>');
+
+            return Command::INVALID;
+        }
+
         $projectRoot = rtrim(getcwd() ?: '.', '/') . '/' . $name;
 
         if (is_dir($projectRoot)) {
@@ -43,18 +74,14 @@ class CreateCommand extends Command
             return Command::FAILURE;
         }
 
-        $output->writeln('<info>VIGEN</info>');
-        $output->writeln('Describe what you want. Vigen builds it.');
-        $output->writeln('');
-
-        // 1. Preferred chat interface.
+        // 2. Preferred chat interface.
         $interface = $input->getOption('interface');
         if ($interface === null) {
             $interface = $helper->ask($input, $output, new ChoiceQuestion('Choose chat preferred:', ['cli', 'gui'], 0));
         }
         $interface = strtolower($interface);
 
-        // 2. Default AI provider.
+        // 3. Default AI provider.
         $providerLabels = [
             'ollama' => 'Ollama (Offline)',
             'openai' => 'OpenAI',
@@ -73,14 +100,14 @@ class CreateCommand extends Command
         $provider = strtolower($provider);
         $providerLabel = $providerLabels[$provider] ?? $provider;
 
-        // 3. Model for the chosen provider.
+        // 4. Model for the chosen provider.
         $model = $input->getOption('model');
         if ($model === null) {
             $models = ProviderModels::for($provider);
             $model = $helper->ask($input, $output, new ChoiceQuestion('Which model to use:', $models, 0));
         }
 
-        // 4. API key, if required and not already supplied.
+        // 5. API key, if required and not already supplied.
         $apiKey = $input->getOption('api-key');
         $apiKeyEnvVar = ProviderModels::apiKeyEnvVar($provider);
         if ($apiKeyEnvVar !== null && $apiKey === null) {
