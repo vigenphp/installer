@@ -1,0 +1,9 @@
+# Keep the branding out of the Composer dist archive.
+#
+# installer-banner.png is a full-width hero image referenced only by
+# README.md. export-ignore removes it from `git archive`, which is what GitHub
+# uses to build the zip Composer downloads for a dist install - so without
+# this every `composer global require vigenphp/installer` would pull the image
+# down as well. It stays in the repository, so the README still shows it on
+# GitHub.
+/installer-banner.png export-ignore
