@@ -177,14 +177,31 @@ class CreateCommand extends Command
         chmod($projectRoot . '/vigen', 0755);
         $output->writeln('✓ vigen (your entry point)');
 
-        file_put_contents($projectRoot . '/README.md', "# {$name}\n\nA [Vigen](https://github.com/vigenphp/vigen) application.\n\n## Setup\n\n```bash\ncomposer install\n" . ($interface === 'gui' ? 'php vigen serve' : 'php vigen chat "Create a user management system"') . "\n```\n");
+        // `vigen serve` runs the *application*; the chatbox is `vigen gui`.
+        // The two were split, so pointing a GUI user at `serve` sends them to a
+        // server with no generated code to serve yet.
+        $readme = "# {$name}\n\n"
+            . "A [Vigen](https://github.com/vigenphp/vigen) application.\n\n"
+            . "## Setup\n\n"
+            . "```bash\n"
+            . "composer install\n"
+            . ($interface === 'gui'
+                ? "php vigen gui      # chat with the AI in a browser\n"
+                : "php vigen chat \"Create a user management system\"\n")
+            . "php vigen migrate  # create the tables your migrations describe\n"
+            . "php vigen serve    # run your app at http://127.0.0.1:8808\n"
+            . "```\n";
+
+        file_put_contents($projectRoot . '/README.md', $readme);
 
         $output->writeln('');
         $output->writeln('<info>Vigen project ready.</info>');
         $output->writeln('');
         $output->writeln("  cd {$name}");
         $output->writeln('  composer install');
-        $output->writeln($interface === 'gui' ? '  php vigen serve' : '  php vigen chat "Create a user management system"');
+        $output->writeln($interface === 'gui' ? '  php vigen gui' : '  php vigen chat "Create a user management system"');
+        $output->writeln('  php vigen migrate');
+        $output->writeln('  php vigen serve');
         $output->writeln('');
 
         return Command::SUCCESS;
@@ -225,7 +242,7 @@ class CreateCommand extends Command
             'license' => 'MIT',
             'require' => [
                 'php' => '^8.2',
-                'vigenphp/vigen' => '^0.1',
+                'vigenphp/vigen' => '^1.0',
             ],
             'config' => [
                 'allow-plugins' => [
