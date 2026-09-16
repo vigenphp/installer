@@ -1,4 +1,4 @@
-![Vigen Installer - create your Vigen project in seconds with vigen create my-app](vigen-installer-banner.png)
+![Vigen Installer - create your Vigen project in seconds with vigen create my-app](installer-banner.png)
 
 # Vigen Installer
 
